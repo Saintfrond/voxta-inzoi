@@ -117,6 +117,14 @@ public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IMod
         DefaultValue = false,
     };
 
+    public static readonly FormBooleanField AllowActions = new()
+    {
+        Name = "AllowActions",
+        Label = "Characters can act in the game",
+        Text = "Characters can make their Zoi do things in the game when they do them in the chat: kiss, hug or dance with another household member, cook, eat, sleep, watch TV and so on. Uses Voxta's action inference, so it needs an action inference service.",
+        DefaultValue = true,
+    };
+
     public static readonly FormChoicesField GameEvents = new()
     {
         Name = "GameEvents",
@@ -161,6 +169,7 @@ public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IMod
             SpeakingGestures,
             SpeakingFaces,
             SwitchToSpeaker,
+            AllowActions,
             GameEvents,
             ReactCooldownSeconds
         ));

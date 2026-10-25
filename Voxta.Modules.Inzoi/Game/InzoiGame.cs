@@ -281,6 +281,78 @@ public sealed class InzoiGame : IAsyncDisposable
 
     private static string Id(long zoiId) => zoiId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
+    // ---- Interactions: making a Zoi do things ----
+
+    /// <summary>What the actor could do with the target (a Zoi or an object) right now, as the game's own menu would offer it.</summary>
+    public async Task<IReadOnlyList<Household.ActionCatalog.Offer>> ListInteractionsAsync(long actorId, long targetId, CancellationToken cancellationToken)
+    {
+        if (!IsConnected) return [];
+        try
+        {
+            var list = await _client.CallToolAsync("interaction_list_available", new { entity_id = Id(actorId), target_entity_id = Id(targetId) }, cancellationToken);
+            return (GameReader.Get(list, "interactions") as System.Text.Json.Nodes.JsonArray ?? [])
+                .Select(i => new Household.ActionCatalog.Offer(
+                    GameReader.Str(i, "interaction_bag_id") ?? "",
+                    GameReader.Str(i, "display_name") ?? "",
+                    GameReader.Bool(i, "enabled") ?? true))
+                .Where(o => o.BagId.Length > 0)
+                .ToArray();
+        }
+        catch (Exception exc) when (exc is McpToolException or HttpRequestException or TaskCanceledException or IOException)
+        {
+            _logger.LogDebug("Could not list inZOI interactions for {Actor} → {Target}: {Reason}", actorId, targetId, exc.Message);
+            return [];
+        }
+    }
+
+    /// <summary>Queues an interaction: the Zoi walks over and does it. Returns null on success, else the game's reason.</summary>
+    public async Task<string?> ExecuteInteractionAsync(long actorId, string bagId, long? targetId, CancellationToken cancellationToken)
+    {
+        if (!IsConnected) return "the game isn't running";
+        try
+        {
+            await _client.CallToolAsync("interaction_execute", targetId is { } t
+                ? new { entity_id = Id(actorId), interaction_bag_id = bagId, target_entity_id = Id(t), insert_front = true }
+                : (object)new { entity_id = Id(actorId), interaction_bag_id = bagId, insert_front = true }, cancellationToken);
+            return null;
+        }
+        catch (McpToolException exc)
+        {
+            return exc.Message.StartsWith(exc.Tool + ": ", StringComparison.Ordinal) ? exc.Message[(exc.Tool.Length + 2)..] : exc.Message;
+        }
+        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or IOException)
+        {
+            return "the game didn't answer";
+        }
+    }
+
+    public sealed record GameObject(long Id, string TableId);
+
+    private (DateTimeOffset At, IReadOnlyList<GameObject> Objects)? _objects;
+
+    /// <summary>The objects on the lot the player is on (furniture, appliances), cached for a minute.</summary>
+    public async Task<IReadOnlyList<GameObject>> GetObjectsAsync(CancellationToken cancellationToken)
+    {
+        if (_objects is { } cached && DateTimeOffset.UtcNow - cached.At < TimeSpan.FromMinutes(1)) return cached.Objects;
+        if (!IsConnected) return [];
+        try
+        {
+            var scan = await _client.CallToolAsync("build_scan_objects", new { Limit = 500 }, cancellationToken);
+            var objects = (GameReader.Get(scan, "objects") as System.Text.Json.Nodes.JsonArray ?? [])
+                .Select(o => (Id: GameReader.Long(o, "entity_id"), Table: GameReader.Str(o, "table_id")))
+                .Where(o => o.Id is not null && !string.IsNullOrWhiteSpace(o.Table))
+                .Select(o => new GameObject(o.Id!.Value, o.Table!))
+                .ToArray();
+            _objects = (DateTimeOffset.UtcNow, objects);
+            return objects;
+        }
+        catch (Exception exc) when (exc is McpToolException or HttpRequestException or TaskCanceledException or IOException)
+        {
+            _logger.LogDebug("Could not list the objects on the lot: {Reason}", exc.Message);
+            return [];
+        }
+    }
+
     private async Task<bool> TryCallAsync(string tool, object arguments, CancellationToken cancellationToken)
     {
         if (!IsConnected) return false;

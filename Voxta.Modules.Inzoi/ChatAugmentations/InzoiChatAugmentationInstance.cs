@@ -28,6 +28,8 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
     private readonly InzoiSettings _settings;
     private readonly ILogger _logger;
     private readonly ZoiMatcher _matcher;
+    private readonly GameActions _actions;
+    private string? _registeredActionTargets;
     private readonly CancellationTokenSource _cts;
     private IAsyncDisposable? _lease;
 
@@ -58,6 +60,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
         _settings = settings;
         _logger = logger;
         _matcher = new ZoiMatcher(settings.NameAliases);
+        _actions = new GameActions(game, logger);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(session.Abort);
         // Everyone in the chat from the start, so every Zoi's state is there for the first reply.
         // Characters a scenario brings in later are picked up when they first speak.
@@ -87,6 +90,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
 
     private void OnStateChanged(GameSnapshot state)
     {
+        ScheduleActionRegistration(state);
         WarnIfUnmatched(state);
         ScheduleContextUpdate();
     }
@@ -240,6 +244,11 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
                 _userTyping = true;
                 break;
 
+            case ActionInferenceSelectedActionScriptEvent selected
+                when selected.Action is ActionCatalog.InteractAction or ActionCatalog.ActivityAction:
+                RunGameAction(selected.Character?.Name, selected.Action, selected.Arguments);
+                break;
+
             case TypingEndScriptEvent:
                 _userTyping = false;
                 break;
@@ -274,6 +283,69 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
             catch (Exception exc)
             {
                 _logger.LogWarning(exc, "Could not show a reply in inZOI");
+            }
+        });
+    }
+
+    // ---- Game actions (kiss, cook, sleep...) ----
+
+    /// <summary>
+    /// Tells Voxta which in-game actions the characters can take. The household members are the
+    /// choices for "who", so this is redone when the household changes.
+    /// </summary>
+    private void ScheduleActionRegistration(GameSnapshot state)
+    {
+        if (!_settings.AllowActions || !state.InGame || state.Zois.Length == 0) return;
+        var targets = string.Join("|", state.Zois.Select(z => z.FirstName).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+        if (targets == _registeredActionTargets) return;
+        _registeredActionTargets = targets;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _session.SetActions(InzoiConstants.ContextKey, GameActions.Definitions(state.Zois.Select(z => z.FirstName)), _cts.Token);
+                _logger.LogInformation("In-game actions available to the characters (household: {Zois})", targets.Replace("|", ", "));
+            }
+            catch (OperationCanceledException)
+            {
+                // The chat ended.
+            }
+            catch (Exception exc)
+            {
+                _registeredActionTargets = null;
+                _logger.LogWarning(exc, "Could not register the in-game actions");
+            }
+        });
+    }
+
+    private void RunGameAction(string? characterName, string action, Dictionary<string, object>? arguments)
+    {
+        if (!_settings.AllowActions || characterName is null) return;
+        var state = _game.State;
+        var actor = Match(characterName, state);
+        if (state is null || actor is null || !_game.IsConnected)
+        {
+            _logger.LogInformation("'{Character}' chose {Action}, but has no Zoi in a running game", characterName, action);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var args = arguments?.ToDictionary(a => a.Key, a => (object?)a.Value, StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, object?>();
+                var outcome = await _actions.RunAsync(actor, state, action, args, _matcher, _cts.Token);
+                // The character should know whether it worked, so it doesn't describe a kiss that never happened next time.
+                await _session.SendSecretAsync($"[In the game: {outcome}]", _cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // The chat ended.
+            }
+            catch (Exception exc)
+            {
+                _logger.LogWarning(exc, "Could not run the in-game action {Action}", action);
             }
         });
     }
