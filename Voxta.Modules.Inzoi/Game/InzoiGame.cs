@@ -198,7 +198,7 @@ public sealed class InzoiGame : IAsyncDisposable
         return await TryCallAsync("entity_show_speech_bubble", new
         {
             text,
-            entity_id = zoiId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            entity_id = Id(zoiId),
             duration = seconds,
         }, cancellationToken);
     }
@@ -206,6 +206,80 @@ public sealed class InzoiGame : IAsyncDisposable
     /// <summary>A short system message at the top of the screen, for things no Zoi says.</summary>
     public Task<bool> ShowToastAsync(string message, double seconds, CancellationToken cancellationToken) =>
         TryCallAsync("toast_show", new { message, lifetime = seconds }, cancellationToken);
+
+    /// <summary>Plays one of the game's character animations on a Zoi. Interrupts what they are doing for its length.</summary>
+    public Task<bool> PlayMotionAsync(long zoiId, string animId, CancellationToken cancellationToken) =>
+        TryCallAsync("motion_play", new { anim_id = animId, entity_id = Id(zoiId) }, cancellationToken);
+
+    public Task<bool> StopMotionAsync(long zoiId, string animId, CancellationToken cancellationToken) =>
+        TryCallAsync("motion_stop", new { anim_id = animId, entity_id = Id(zoiId) }, cancellationToken);
+
+    public Task<bool> SetFaceAsync(long zoiId, string expression, CancellationToken cancellationToken) =>
+        TryCallAsync("facial_set", new { Expression = expression, entity_id = Id(zoiId) }, cancellationToken);
+
+    /// <summary>Hands the player's control (and with it the camera) to this Zoi.</summary>
+    public Task<bool> PossessAsync(long zoiId, CancellationToken cancellationToken) =>
+        TryCallAsync("character_possess", new { character_id = Id(zoiId) }, cancellationToken);
+
+    private readonly Dictionary<string, double> _motionLengths = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How long an animation runs, in seconds. Null when the game doesn't know it for this Zoi.</summary>
+    public async Task<double?> GetMotionLengthAsync(long zoiId, string animId, CancellationToken cancellationToken)
+    {
+        lock (_motionLengths)
+        {
+            if (_motionLengths.TryGetValue(animId, out var known)) return known;
+        }
+
+        if (!IsConnected) return null;
+        try
+        {
+            var info = await _client.CallToolAsync("motion_get_info", new { anim_id = animId, entity_id = Id(zoiId) }, cancellationToken);
+            var length = GameReader.Double(info, "total_length");
+            if (length is not > 0) return null;
+            lock (_motionLengths) _motionLengths[animId] = length.Value;
+            return length;
+        }
+        catch (Exception exc) when (exc is McpToolException or HttpRequestException or TaskCanceledException or IOException)
+        {
+            return null;
+        }
+    }
+
+    private Dictionary<string, string>? _faceByLabel;
+
+    /// <summary>
+    /// The facial expression the game uses for an emotion. Emotion and expression ids differ (Enchanting 2
+    /// is "Lovestruck", whose face is "Sensual"); they share the game's word for it.
+    /// </summary>
+    public async Task<string?> FaceForEmotionAsync(EmotionInfo? emotion, CancellationToken cancellationToken)
+    {
+        if (emotion is null) return null;
+        if (_faceByLabel is null && IsConnected)
+        {
+            try
+            {
+                var list = await _client.CallToolAsync("facial_list", null, cancellationToken);
+                var faces = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var face in GameReader.Get(list, "expressions") as System.Text.Json.Nodes.JsonArray ?? [])
+                {
+                    if (GameReader.Str(face, "id") is { Length: > 0 } id && GameReader.Str(face, "l10n") is { Length: > 0 } label)
+                        faces.TryAdd(label, id);
+                }
+
+                _faceByLabel = faces;
+            }
+            catch (Exception exc) when (exc is McpToolException or HttpRequestException or TaskCanceledException or IOException)
+            {
+                return null;
+            }
+        }
+
+        if (emotion.Label is { } l && _faceByLabel?.TryGetValue(l, out var byLabel) == true) return byLabel;
+        return emotion.Type;
+    }
+
+    private static string Id(long zoiId) => zoiId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task<bool> TryCallAsync(string tool, object arguments, CancellationToken cancellationToken)
     {

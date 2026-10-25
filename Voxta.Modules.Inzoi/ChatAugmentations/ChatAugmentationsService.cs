@@ -85,6 +85,9 @@ public class ChatAugmentationsService(
             ShowRepliesInGame: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.ShowRepliesInGame),
             HideActionsInBubbles: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.HideActionsInBubbles),
             ShowUserMessagesInGame: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.ShowUserMessagesInGame),
+            SpeakingGestures: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.SpeakingGestures),
+            SpeakingFaces: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.SpeakingFaces),
+            SwitchToSpeaker: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.SwitchToSpeaker),
             GameEvents: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.GameEvents),
             ReactCooldown: TimeSpan.FromSeconds(cooldown)
         );
@@ -102,6 +105,9 @@ public sealed record InzoiSettings(
     bool ShowRepliesInGame,
     bool HideActionsInBubbles,
     bool ShowUserMessagesInGame,
+    bool SpeakingGestures,
+    bool SpeakingFaces,
+    bool SwitchToSpeaker,
     string GameEvents,
     TimeSpan ReactCooldown
 );

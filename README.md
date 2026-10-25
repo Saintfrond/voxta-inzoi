@@ -43,6 +43,9 @@ The defaults work when inZOI and Voxta run on the same PC. Settings, under the m
 | Show replies as speech bubbles | Character replies appear above their Zoi, a sentence or two at a time. |
 | Leave \*actions\* out of bubbles | Narration between asterisks stays in the chat only. |
 | Show my messages in the game | Your messages appear too (above your Zoi, or as a message at the top of the screen). |
+| Zois gesture while speaking | The speaking Zoi plays inZOI's own conversation animations (friendly, normal or upset; standing or seated). |
+| Facial expressions while speaking | The Zoi's face follows the reply (laughing, sad, angry, surprised, smitten), otherwise their emotion. |
+| Switch control to the speaker | Moves the camera to whoever speaks by taking control of them. Off by default. |
 | Game events | Ignore events, tell characters quietly, or let them react right away. |
 | Seconds between reactions | Limits how often a character speaks up on its own. |
 
@@ -57,6 +60,14 @@ Make one Voxta character per Zoi you want to talk to, named like the Zoi (`Juve 
 `Juve` if no one else in the household is called Juve), and turn on the **inZOI** augmentation
 (`inzoi`) for it. Write the character's personality as you see that Zoi; the module adds the live
 state on top. A group chat with several of them is a family conversation.
+
+## Lip sync and camera
+
+inZOI's interface has no lip sync and no way to point the camera at a Zoi. Instead, while a
+character speaks (timed by Voxta's speech, or the length of the reply without text to speech),
+their Zoi plays the conversation gestures the game itself uses when Zois talk, with a facial
+expression that fits what they say. For the camera, **Switch control to the speaker** hands you
+control of the speaking Zoi, which moves the camera to them.
 
 ## What the characters know
 

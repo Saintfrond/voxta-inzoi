@@ -219,8 +219,15 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
 
             case GeneratingCompleteActionScriptEvent complete:
                 _generating = false;
+                var speaker = Match(complete.Character.Name, _game.State);
                 if (_settings.ShowRepliesInGame)
-                    ShowBubbles(Match(complete.Character.Name, _game.State)?.Id, complete.Message.Value);
+                    ShowBubbles(speaker?.Id, complete.Message.Value);
+                if (speaker is not null)
+                    ExpectSpeech(complete.Character.Name, speaker.Id, complete.Message.Value);
+                break;
+
+            case SpeechStartActionScriptEvent speech:
+                StartPendingPerformance(speech.Character.Name);
                 break;
 
             case UserMessageReceivedActionScriptEvent userMessage:
@@ -269,6 +276,133 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
                 _logger.LogWarning(exc, "Could not show a reply in inZOI");
             }
         });
+    }
+
+    // ---- The Zoi performing the reply ----
+
+    /// <summary>A reply that is ready and about to be spoken (or read, without text to speech).</summary>
+    private sealed record PendingSpeech(string Character, long ZoiId, string? Text, DateTimeOffset At)
+    {
+        public int Started;
+    }
+
+    private PendingSpeech? _pendingSpeech;
+
+    /// <summary>Without text to speech there's no speechStart; after this long, the reply being ready is the moment.</summary>
+    private static readonly TimeSpan NoSpeechFallback = TimeSpan.FromSeconds(1.5);
+
+    /// <summary>The performance running now: a newer reply cancels it.</summary>
+    private CancellationTokenSource? _performance;
+
+    private void ExpectSpeech(string character, long zoiId, string? text)
+    {
+        if (!_settings.SpeakingGestures && !_settings.SpeakingFaces && !_settings.SwitchToSpeaker) return;
+        var pending = new PendingSpeech(character, zoiId, text, DateTimeOffset.UtcNow);
+        _pendingSpeech = pending;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(NoSpeechFallback, _cts.Token);
+                if (ReferenceEquals(_pendingSpeech, pending)) StartPerformance(pending);
+            }
+            catch (OperationCanceledException)
+            {
+                // The chat ended.
+            }
+        });
+    }
+
+    private void StartPendingPerformance(string character)
+    {
+        var pending = _pendingSpeech;
+        if (pending is null || !string.Equals(pending.Character, character, StringComparison.OrdinalIgnoreCase)) return;
+        if (DateTimeOffset.UtcNow - pending.At > TimeSpan.FromMinutes(2)) return;
+        StartPerformance(pending);
+    }
+
+    private void StartPerformance(PendingSpeech pending)
+    {
+        // Speech start and the no-speech fallback can both arrive; the first one runs it.
+        if (Interlocked.Exchange(ref pending.Started, 1) == 1) return;
+        if (!_game.IsConnected) return;
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        Interlocked.Exchange(ref _performance, cts)?.Cancel();
+        _ = Task.Run(() => PerformAsync(pending, cts.Token));
+    }
+
+    /// <summary>
+    /// Makes the Zoi look like the one talking for about as long as the reply takes to say: the camera
+    /// (by taking control of them, if wanted), a face that fits what they say, and inZOI's own
+    /// conversation gestures, one after another.
+    /// </summary>
+    private async Task PerformAsync(PendingSpeech speech, CancellationToken cancellationToken)
+    {
+        string? lastAnimation = null;
+        var faceChanged = false;
+        try
+        {
+            var zoi = _game.State?.Zois.FirstOrDefault(z => z.Id == speech.ZoiId);
+            if (zoi is null) return;
+
+            if (_settings.SwitchToSpeaker && _game.State?.PossessedId != zoi.Id)
+                await _game.PossessAsync(zoi.Id, cancellationToken);
+
+            var replyFace = _settings.SpeakingFaces ? Performance.FaceFor(speech.Text) : null;
+            var face = replyFace ?? (_settings.SpeakingFaces ? await _game.FaceForEmotionAsync(zoi.Emotion, cancellationToken) : null);
+            if (face is not null)
+                faceChanged = await _game.SetFaceAsync(zoi.Id, face, cancellationToken);
+
+            var until = DateTimeOffset.UtcNow + Performance.SpeakingTime(speech.Text);
+            if (!_settings.SpeakingGestures)
+            {
+                var rest = until - DateTimeOffset.UtcNow;
+                if (rest > TimeSpan.Zero) await Task.Delay(rest, cancellationToken);
+                return;
+            }
+
+            var animations = Performance.TalkAnimations(Performance.Tone(replyFace, zoi.Emotion), Performance.LooksSeated(zoi.Activity));
+            var next = Random.Shared.Next(animations.Count);
+            while (DateTimeOffset.UtcNow < until)
+            {
+                var animation = animations[next++ % animations.Count];
+                if (!await _game.PlayMotionAsync(zoi.Id, animation, cancellationToken)) return;
+                lastAnimation = animation;
+
+                var length = await _game.GetMotionLengthAsync(zoi.Id, animation, cancellationToken) ?? 4;
+                var left = until - DateTimeOffset.UtcNow;
+                // Let a gesture finish when most of it would still be cut off; it looks better than freezing mid-way.
+                var wait = TimeSpan.FromSeconds(Math.Max(1, Math.Min(length, Math.Max(left.TotalSeconds, length * 0.6))));
+                await Task.Delay(wait, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer reply took over (it sets its own face and gestures), or the chat ended.
+            return;
+        }
+        catch (Exception exc)
+        {
+            _logger.LogWarning(exc, "Could not animate the speaking Zoi in inZOI");
+        }
+
+        // Back to what the Zoi was doing, with the face their emotion gives them.
+        try
+        {
+            if (lastAnimation is not null)
+                await _game.StopMotionAsync(speech.ZoiId, lastAnimation, CancellationToken.None);
+            if (faceChanged)
+            {
+                var zoi = _game.State?.Zois.FirstOrDefault(z => z.Id == speech.ZoiId);
+                if (await _game.FaceForEmotionAsync(zoi?.Emotion, CancellationToken.None) is { } restFace)
+                    await _game.SetFaceAsync(speech.ZoiId, restFace, CancellationToken.None);
+            }
+        }
+        catch (Exception exc)
+        {
+            _logger.LogDebug(exc, "Could not reset the Zoi after speaking");
+        }
     }
 
     private async Task ShowUserMessageAsync(string? text, CancellationToken cancellationToken)

@@ -93,6 +93,30 @@ public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IMod
         DefaultValue = false,
     };
 
+    public static readonly FormBooleanField SpeakingGestures = new()
+    {
+        Name = "SpeakingGestures",
+        Label = "Zois gesture while speaking",
+        Text = "While a character speaks, their Zoi plays inZOI's own conversation animations (friendly, normal or upset, standing or seated), so you can see who's talking. It briefly interrupts what the Zoi was doing.",
+        DefaultValue = true,
+    };
+
+    public static readonly FormBooleanField SpeakingFaces = new()
+    {
+        Name = "SpeakingFaces",
+        Label = "Facial expressions while speaking",
+        Text = "The Zoi's face follows the reply: laughing at a joke, sad, angry, surprised, smitten. Otherwise it shows their current emotion.",
+        DefaultValue = true,
+    };
+
+    public static readonly FormBooleanField SwitchToSpeaker = new()
+    {
+        Name = "SwitchToSpeaker",
+        Label = "Switch control to the speaker",
+        Text = "inZOI can't point the camera at a Zoi on its own, but switching control to them moves the camera there. On: you take control of whichever household Zoi is speaking. Best for one-on-one chats; in a group chat control jumps around.",
+        DefaultValue = false,
+    };
+
     public static readonly FormChoicesField GameEvents = new()
     {
         Name = "GameEvents",
@@ -134,6 +158,9 @@ public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IMod
             ShowRepliesInGame,
             HideActionsInBubbles,
             ShowUserMessagesInGame,
+            SpeakingGestures,
+            SpeakingFaces,
+            SwitchToSpeaker,
             GameEvents,
             ReactCooldownSeconds
         ));
