@@ -1,0 +1,9 @@
+{
+  "id": "Voxta.Modules.Inzoi",
+  "version": "0.1.0-alpha.1",
+  "author": "Saintfrond",
+  "voxta": ">=1.13.0",
+  "label": "inZOI",
+  "category": "Games",
+  "description": "Chat with your inZOI household. Characters know their Zoi's live emotion, needs, job, wishes, what they are doing and their relationships, and their replies appear as speech bubbles above the Zoi in the game. Uses inZOI's built-in MCP server; no game mod needed."
+}

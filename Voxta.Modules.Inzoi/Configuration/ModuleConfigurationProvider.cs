@@ -1,0 +1,141 @@
+using Voxta.Abstractions.Registration;
+using Voxta.Abstractions.Security;
+using Voxta.Model.Shared.Forms;
+using Voxta.Modules.Inzoi.Household;
+
+namespace Voxta.Modules.Inzoi.Configuration;
+
+public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IModuleConfigurationProvider
+{
+    public static string[] FieldsRequiringReload => [];
+
+    public static readonly FormTextField Port = new()
+    {
+        Name = "Port",
+        Label = "inZOI MCP port",
+        Text = "The port of inZOI's built-in MCP server on this PC. Default 11212. Only change it if you start inZOI with -climcpport=<port>.",
+        DefaultValue = "11212",
+    };
+
+    public static readonly FormTextField PollSeconds = new()
+    {
+        Name = "PollSeconds",
+        Label = "Seconds between game reads",
+        Text = "How often the household's state is read from the game while a chat is open. 5 is a good balance; minimum 2.",
+        DefaultValue = "5",
+    };
+
+    public static readonly FormBooleanField IncludeRelationships = new()
+    {
+        Name = "IncludeRelationships",
+        Label = "Include relationships",
+        Text = "Tell characters about their Zoi's relationships (family, friends, romance). Read every half minute or so.",
+        DefaultValue = true,
+    };
+
+    public static readonly FormChoicesField UserRole = new()
+    {
+        Name = "UserRole",
+        Label = "Who are you to the Zois?",
+        Text = "How the household sees you, the person chatting.",
+        DefaultValue = Choices.UserIsWatcher,
+        Choices =
+        [
+            new() { Value = Choices.UserIsWatcher, Label = "The player (the unseen presence who guides their lives)" },
+            new() { Value = Choices.UserIsPossessedZoi, Label = "The Zoi I'm currently controlling" },
+            new() { Value = Choices.UserIsCustom, Label = "Custom (write it below)" },
+        ],
+    };
+
+    public static readonly FormMultilineField CustomUserRole = new()
+    {
+        Name = "CustomUserRole",
+        Label = "Custom description of you",
+        Text = "Used when 'Who are you to the Zois?' is Custom. {{ user }} is your name.",
+        Required = false,
+        DefaultValue = "",
+        Rows = 3,
+        Placeholder = "{{ user }} is a neighbour who often drops by for coffee.",
+    };
+
+    public static readonly FormMultilineField NameAliases = new()
+    {
+        Name = "NameAliases",
+        Label = "Character → Zoi names",
+        Text = "Characters are matched to Zois by name automatically (full name, then a unique first name). Add a line `Character Name = Zoi First Last` for any that don't match.",
+        Required = false,
+        DefaultValue = "",
+        Rows = 4,
+        Placeholder = "Mom = Paul Lez",
+    };
+
+    public static readonly FormBooleanField ShowRepliesInGame = new()
+    {
+        Name = "ShowRepliesInGame",
+        Label = "Show replies as speech bubbles",
+        Text = "Each reply from a character appears as a speech bubble above their Zoi's head. Long replies are shown a sentence or two at a time.",
+        DefaultValue = true,
+    };
+
+    public static readonly FormBooleanField HideActionsInBubbles = new()
+    {
+        Name = "HideActionsInBubbles",
+        Label = "Leave *actions* out of bubbles",
+        Text = "Narration between asterisks (*smiles*) stays in the chat but isn't shown in the speech bubble.",
+        DefaultValue = true,
+    };
+
+    public static readonly FormBooleanField ShowUserMessagesInGame = new()
+    {
+        Name = "ShowUserMessagesInGame",
+        Label = "Show my messages in the game",
+        Text = "Your own messages appear too: above the Zoi you control when you play as them, otherwise as a short message at the top of the screen.",
+        DefaultValue = false,
+    };
+
+    public static readonly FormChoicesField GameEvents = new()
+    {
+        Name = "GameEvents",
+        Label = "Game events",
+        Text = "What happens when something notable happens to a Zoi in the chat (a strong emotion, a need running low, a new job, a wedding...).",
+        DefaultValue = Choices.EventsSilent,
+        Choices =
+        [
+            new() { Value = Choices.EventsOff, Label = "Ignore them" },
+            new() { Value = Choices.EventsSilent, Label = "Tell the character quietly (it may bring it up next reply)" },
+            new() { Value = Choices.EventsReact, Label = "Let the character react right away" },
+        ],
+    };
+
+    public static readonly FormTextField ReactCooldownSeconds = new()
+    {
+        Name = "ReactCooldownSeconds",
+        Label = "Seconds between reactions",
+        Text = "With 'react right away', a character speaks up on its own at most once per this many seconds.",
+        DefaultValue = "90",
+    };
+
+    public Task<FormField[]> GetModuleConfigurationFieldsAsync(
+        IAuthenticationContext auth,
+        ISettingsSource settings,
+        CancellationToken cancellationToken
+    )
+    {
+        return Task.FromResult(FormBuilder.Build(
+            FormTitleField.Create("Game connection"),
+            Port,
+            PollSeconds,
+            IncludeRelationships,
+            FormTitleField.Create("Household"),
+            UserRole,
+            CustomUserRole,
+            NameAliases,
+            FormTitleField.Create("In the game"),
+            ShowRepliesInGame,
+            HideActionsInBubbles,
+            ShowUserMessagesInGame,
+            GameEvents,
+            ReactCooldownSeconds
+        ));
+    }
+}

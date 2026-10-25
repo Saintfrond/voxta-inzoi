@@ -1,0 +1,287 @@
+using System.Net.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Voxta.Modules.Inzoi.Mcp;
+
+namespace Voxta.Modules.Inzoi.Game;
+
+/// <summary>
+/// The one link to the running game, shared by every chat. inZOI serves an MCP interface on
+/// localhost while it runs; this polls it for the household's state and sends speech bubbles back.
+///
+/// It only polls while at least one chat holds a lease (<see cref="Acquire"/>), so an idle Voxta
+/// doesn't knock on the game's door every few seconds. When the game isn't running, it tries again
+/// at a slower pace until it is.
+/// </summary>
+public sealed class InzoiGame : IAsyncDisposable
+{
+    public const int DefaultPort = 11212;
+
+    private static readonly Lock SharedGate = new();
+    private static InzoiGame? _shared;
+
+    /// <summary>The game for this process. Voxta may run a module's setup more than once.</summary>
+    public static InzoiGame GetOrCreate()
+    {
+        lock (SharedGate)
+        {
+            if (_shared is null || _shared._disposed)
+                _shared = new InzoiGame();
+            return _shared;
+        }
+    }
+
+    private InzoiGame()
+    {
+        _client = new McpClient(McpClient.EndpointFor(DefaultPort));
+        _reader = new GameReader(_client.CallToolAsync);
+        McpClient.ModuleVersion = ModuleInfo.Version;
+    }
+
+    /// <summary>When the game isn't there, look again this often.</summary>
+    private static readonly TimeSpan OfflineRetryDelay = TimeSpan.FromSeconds(15);
+
+    /// <summary>Job status, wishes and relationships change slowly; read them every this many polls.</summary>
+    private const int SlowDetailsEvery = 6;
+
+    private readonly McpClient _client;
+    private readonly GameReader _reader;
+    private readonly Lock _gate = new();
+    private ILogger _logger = NullLogger.Instance;
+    private bool _disposed;
+
+    private int _leases;
+    private CancellationTokenSource? _loopCts;
+    private Task? _loop;
+    private TimeSpan _interval = TimeSpan.FromSeconds(5);
+    private bool _includeRelationships = true;
+    private readonly SemaphoreSlim _wake = new(0, int.MaxValue);
+    private string? _lastProblems;
+
+    /// <summary>The most recent snapshot. Kept after the game closes, so a chat can still say what it last saw.</summary>
+    public GameSnapshot? State { get; private set; }
+
+    public bool IsConnected { get; private set; }
+
+    public string? ServerInfo => _client.ServerInfo;
+
+    /// <summary>Raised on the polling thread after every successful read. Handlers must not block it.</summary>
+    public event Action<GameSnapshot>? StateChanged;
+
+    public event Action<GameEvent>? EventReceived;
+
+    public event Action<bool>? ConnectionChanged;
+
+    public void AttachLogger(ILoggerFactory loggerFactory)
+    {
+        if (_logger is not NullLogger) return;
+        _logger = loggerFactory.CreateLogger<InzoiGame>();
+    }
+
+    /// <summary>
+    /// Starts polling with these settings until the returned lease is disposed. Settings from the
+    /// most recent chat win; they are the same module settings for everyone anyway.
+    /// </summary>
+    public IAsyncDisposable Acquire(int port, TimeSpan interval, bool includeRelationships)
+    {
+        lock (_gate)
+        {
+            _client.SetEndpoint(McpClient.EndpointFor(port));
+            _interval = interval < TimeSpan.FromSeconds(2) ? TimeSpan.FromSeconds(2) : interval;
+            _includeRelationships = includeRelationships;
+            _leases++;
+            if (_loop is null || _loop.IsCompleted)
+            {
+                _loopCts = new CancellationTokenSource();
+                var token = _loopCts.Token;
+                _loop = Task.Run(() => PollLoopAsync(token));
+                _logger.LogInformation("Watching inZOI on {Endpoint}", _client.Endpoint);
+            }
+        }
+
+        return new Lease(this);
+    }
+
+    private void Release()
+    {
+        CancellationTokenSource? cts = null;
+        lock (_gate)
+        {
+            if (--_leases > 0) return;
+            _leases = 0;
+            cts = _loopCts;
+            _loopCts = null;
+            _loop = null;
+        }
+
+        cts?.Cancel();
+        _logger.LogInformation("No chat uses inZOI any more; stopped watching the game");
+    }
+
+    /// <summary>Read the game now rather than at the next tick, e.g. when a chat starts.</summary>
+    public void RefreshSoon() => _wake.Release();
+
+    private async Task PollLoopAsync(CancellationToken cancellationToken)
+    {
+        var count = 0;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var delay = _interval;
+            try
+            {
+                var slow = count++ % SlowDetailsEvery == 0 || State is null || !State.InGame;
+                var snapshot = await _reader.ReadAsync(State, slow, _includeRelationships, cancellationToken);
+                SetConnected(true);
+                LogProblems();
+
+                var previous = State;
+                State = snapshot;
+                Raise(StateChanged, snapshot);
+                foreach (var gameEvent in EventDetector.Compare(previous, snapshot))
+                {
+                    _logger.LogDebug("inZOI event {Kind}: {Text}", gameEvent.Kind, gameEvent.Text);
+                    Raise(EventReceived, gameEvent);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or IOException)
+            {
+                // The game isn't running (or is still starting up). Ordinary; try again later.
+                if (IsConnected) _logger.LogInformation("inZOI is no longer reachable ({Reason})", exc.Message);
+                _client.Reset();
+                SetConnected(false);
+                delay = OfflineRetryDelay;
+                count = 0;
+            }
+            catch (Exception exc)
+            {
+                _logger.LogWarning(exc, "Reading the inZOI household failed");
+                delay = OfflineRetryDelay;
+            }
+
+            try
+            {
+                await _wake.WaitAsync(delay, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    private void LogProblems()
+    {
+        var problems = _reader.Problems.Count == 0 ? null : string.Join("; ", _reader.Problems.Distinct());
+        if (problems == _lastProblems) return;
+        _lastProblems = problems;
+        if (problems is not null)
+            _logger.LogWarning("Some inZOI details could not be read (after a game update?): {Problems}", problems);
+    }
+
+    private void SetConnected(bool connected)
+    {
+        if (IsConnected == connected) return;
+        IsConnected = connected;
+        if (connected) _logger.LogInformation("Connected to inZOI ({Server})", _client.ServerInfo ?? "MCP");
+        Raise(ConnectionChanged, connected);
+    }
+
+    // ---- Into the game ----
+
+    /// <summary>A speech bubble above the Zoi's head. Returns false when the game isn't there.</summary>
+    public async Task<bool> ShowSpeechBubbleAsync(long zoiId, string text, double seconds, CancellationToken cancellationToken)
+    {
+        return await TryCallAsync("entity_show_speech_bubble", new
+        {
+            text,
+            entity_id = zoiId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            duration = seconds,
+        }, cancellationToken);
+    }
+
+    /// <summary>A short system message at the top of the screen, for things no Zoi says.</summary>
+    public Task<bool> ShowToastAsync(string message, double seconds, CancellationToken cancellationToken) =>
+        TryCallAsync("toast_show", new { message, lifetime = seconds }, cancellationToken);
+
+    private async Task<bool> TryCallAsync(string tool, object arguments, CancellationToken cancellationToken)
+    {
+        if (!IsConnected) return false;
+        try
+        {
+            await _client.CallToolAsync(tool, arguments, cancellationToken);
+            return true;
+        }
+        catch (McpToolException exc)
+        {
+            _logger.LogWarning("inZOI refused {Tool}: {Reason}", tool, exc.Message);
+            return false;
+        }
+        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or IOException)
+        {
+            _logger.LogDebug(exc, "Could not reach inZOI for {Tool}; it probably just closed", tool);
+            return false;
+        }
+    }
+
+    private void Raise<T>(Action<T>? handler, T value)
+    {
+        if (handler is null) return;
+        foreach (var single in handler.GetInvocationList().Cast<Action<T>>())
+        {
+            try
+            {
+                single(value);
+            }
+            catch (Exception exc)
+            {
+                // One chat's bug must not cut the game off from the others.
+                _logger.LogWarning(exc, "An inZOI listener failed");
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        CancellationTokenSource? cts;
+        Task? loop;
+        lock (_gate)
+        {
+            cts = _loopCts;
+            loop = _loop;
+            _loopCts = null;
+            _loop = null;
+            _leases = 0;
+        }
+
+        if (cts is not null) await cts.CancelAsync();
+        if (loop is not null)
+        {
+            try
+            {
+                await loop;
+            }
+            catch
+            {
+                // Stopping anyway.
+            }
+        }
+
+        _client.Dispose();
+    }
+
+    private sealed class Lease(InzoiGame game) : IAsyncDisposable
+    {
+        private int _released;
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) game.Release();
+            return ValueTask.CompletedTask;
+        }
+    }
+}

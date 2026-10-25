@@ -1,0 +1,40 @@
+# One-click release from the Actions tab: Actions → publish release → Run workflow.
+# Tags the version in module.json (v + version) and starts release.yml on that tag. Same result as
+# `git tag v0.1.0 && git push --tags`, for when pushing tags from where you work isn't possible.
+#
+# A tag pushed with the workflow's own token doesn't start other workflows, so this starts
+# release.yml explicitly; release.yml accepts workflow_dispatch for that reason.
+name: publish release
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag the version in module.json
+        id: tag
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('Voxta.Modules.Inzoi/module.json'))['version'])")
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "::error::$tag already exists. Bump the version in module.json first."
+            exit 1
+          fi
+          git tag "$tag"
+          git push origin "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Tagged $tag" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Start the release on the tag
+        run: gh workflow run release.yml --ref "${{ steps.tag.outputs.tag }}" --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

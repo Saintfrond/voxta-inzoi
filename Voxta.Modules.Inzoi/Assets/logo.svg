@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- A city block with a speech bubble: chatting with a household in a living city. -->
+  <rect width="64" height="64" rx="14" fill="#3b4cca"/>
+  <rect x="10" y="30" width="12" height="22" rx="2" fill="#ffffff"/>
+  <rect x="25" y="22" width="13" height="30" rx="2" fill="#ffffff"/>
+  <rect x="41" y="34" width="13" height="18" rx="2" fill="#ffffff"/>
+  <rect x="28" y="27" width="3" height="3" fill="#3b4cca"/>
+  <rect x="32" y="27" width="3" height="3" fill="#3b4cca"/>
+  <rect x="28" y="33" width="3" height="3" fill="#3b4cca"/>
+  <rect x="32" y="33" width="3" height="3" fill="#3b4cca"/>
+  <path d="M40 8 H54 A4 4 0 0 1 58 12 V20 A4 4 0 0 1 54 24 H48 L43 28 V24 H40 A4 4 0 0 1 36 20 V12 A4 4 0 0 1 40 8 Z" fill="#ffd166"/>
+</svg>
