@@ -42,6 +42,8 @@ public static class EventDetector
                 events.Add(new GameEvent { ZoiId = zoi.Id, Kind = "job_changed", Importance = 1, Text = text });
             }
 
+            Relationships(events, before, after, old, zoi);
+
             if (zoi.IsMarried && !old.IsMarried)
             {
                 var spouse = after.Zois.FirstOrDefault(z => z.Id == zoi.SpouseId)?.FullName
@@ -60,6 +62,51 @@ public static class EventDetector
         return events;
     }
 
+    /// <summary>A big swing in how two Zois feel about each other, as when they fight or make up.</summary>
+    private static void Relationships(List<GameEvent> events, GameSnapshot before, GameSnapshot after, ZoiInfo old, ZoiInfo zoi)
+    {
+        if (old.Relationships.Length == 0 || zoi.Relationships.Length == 0) return;
+        foreach (var now in zoi.Relationships)
+        {
+            var was = old.Relationships.FirstOrDefault(r => r.Id == now.Id);
+            if (was is null) continue;
+            // Between two household members, both sides change: tell it once.
+            if (after.Zois.Any(z => z.Id == now.Id) && now.Id < zoi.Id) continue;
+
+            var friendship = now.Friendship - was.Friendship;
+            var romance = now.Romance - was.Romance;
+            var worst = Math.Min(friendship, romance);
+            var best = Math.Max(friendship, romance);
+
+            if (worst <= -8)
+            {
+                var what = romance <= friendship ? "romance" : "friendship";
+                events.Add(new GameEvent
+                {
+                    ZoiId = zoi.Id,
+                    OtherIds = [now.Id],
+                    Kind = "relationship_worse",
+                    Importance = worst <= -20 ? 2 : 1,
+                    Text = worst <= -20
+                        ? $"{zoi.FullName} and {now.Name} just had a serious falling-out: their {what} took a heavy blow."
+                        : $"Something went wrong between {zoi.FullName} and {now.Name}: their {what} took a hit.",
+                });
+            }
+            else if (best >= 10)
+            {
+                var what = romance >= friendship ? "romance" : "friendship";
+                events.Add(new GameEvent
+                {
+                    ZoiId = zoi.Id,
+                    OtherIds = [now.Id],
+                    Kind = "relationship_better",
+                    Importance = best >= 20 ? 1 : 0,
+                    Text = $"{zoi.FullName} and {now.Name} grew closer ({what}).",
+                });
+            }
+        }
+    }
+
     private static void Emotion(List<GameEvent> events, ZoiInfo old, ZoiInfo zoi)
     {
         if (zoi.Emotion is not { } now) return;
@@ -68,7 +115,9 @@ public static class EventDetector
         // Waking up and falling asleep are visible enough without an event.
         if (now.Type is "Sleep" or "Normal") return;
 
-        var importance = now.Level >= 3 ? 2 : now.Level >= 2 ? 1 : 0;
+        // Bad feelings matter more than good ones: they're what a character should notice and ask about.
+        var negative = string.Equals(now.Tendency, "negative", StringComparison.OrdinalIgnoreCase);
+        var importance = now.Level >= 3 || (negative && now.Level >= 2) ? 2 : now.Level >= 2 || negative ? 1 : 0;
         var text = was is null || was.Type is "Normal"
             ? $"{zoi.FullName} is now {Phrases.Emotion(now)}."
             : $"{zoi.FullName} is now {Phrases.Emotion(now)} (was {Phrases.Emotion(was)}).";

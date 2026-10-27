@@ -13,7 +13,7 @@ public static class HouseholdContextBuilder
     public sealed record Options(string UserRole, string? CustomUserRole);
 
     /// <param name="participants">Zois played by characters in this chat, keyed by Zoi id, with the character's name.</param>
-    public static string Build(GameSnapshot? state, bool connected, IReadOnlyDictionary<long, string> participants, Options options)
+    public static string Build(GameSnapshot? state, bool connected, IReadOnlyDictionary<long, string> participants, Options options, IReadOnlyList<Happening>? recent = null)
     {
         var text = new StringBuilder();
 
@@ -44,22 +44,33 @@ public static class HouseholdContextBuilder
         var others = state.Zois.Where(z => !participants.ContainsKey(z.Id)).ToArray();
 
         foreach (var zoi in inChat)
-            AppendZoiInDetail(text, zoi, participants[zoi.Id]);
+            AppendZoiInDetail(text, zoi, participants[zoi.Id], state);
 
         if (others.Length > 0)
         {
             text.AppendLine("Also in the household:");
             foreach (var zoi in others)
-                text.Append("- ").AppendLine(SummaryLine(zoi));
+                text.Append("- ").AppendLine(SummaryLine(zoi, state));
+        }
+
+        if (recent is { Count: > 0 })
+        {
+            text.AppendLine("Recently in the game (oldest first; this is what just happened between them, so it explains how they feel now):");
+            foreach (var happening in recent)
+            {
+                text.Append("- ");
+                if (!string.IsNullOrWhiteSpace(happening.GameTime)) text.Append(happening.GameTime).Append(' ');
+                text.AppendLine(happening.Text);
+            }
         }
 
         AppendUserRole(text, state, options);
 
-        text.AppendLine("Stay true to your Zoi: let their emotion, needs and what they are doing shape how you talk, the way a person would mention being tired or busy. Don't recite these notes or quote numbers.");
+        text.AppendLine("Stay true to your Zoi: let their emotion, needs, what they are doing and what just happened between them shape how you talk, the way a person would mention being tired or busy. Don't recite these notes or quote numbers.");
         return text.ToString().TrimEnd();
     }
 
-    private static void AppendZoiInDetail(StringBuilder text, ZoiInfo zoi, string characterName)
+    private static void AppendZoiInDetail(StringBuilder text, ZoiInfo zoi, string characterName, GameSnapshot state)
     {
         text.Append("* ").Append(zoi.FullName);
         if (!string.Equals(ZoiMatcher.Normalize(characterName), ZoiMatcher.Normalize(zoi.FullName), StringComparison.Ordinal))
@@ -69,10 +80,21 @@ public static class HouseholdContextBuilder
         text.AppendLine();
 
         var emotion = Phrases.Emotion(zoi.Emotion);
-        if (emotion is not null) text.Append("  Feeling: ").AppendLine(emotion);
+        if (emotion is not null)
+        {
+            text.Append("  Feeling: ").Append(emotion);
+            if (zoi.Emotion is { } e && !e.Type.Equals("Normal", StringComparison.OrdinalIgnoreCase) && !e.Type.Equals("Sleep", StringComparison.OrdinalIgnoreCase))
+            {
+                var negative = string.Equals(e.Tendency, "negative", StringComparison.OrdinalIgnoreCase);
+                if (e.Level >= 3) text.Append(" — overwhelming, it dominates everything they say");
+                else if (e.Level >= 2 || negative) text.Append(negative ? " — clearly, and it should show in how they talk" : " — clearly");
+            }
+
+            text.AppendLine();
+        }
 
         if (zoi.Activity is { } activity)
-            text.Append("  Doing: ").AppendLine(Phrases.Activity(activity));
+            text.Append("  Doing: ").AppendLine(ActivityWithWhom(zoi, activity, state));
 
         if (!string.IsNullOrWhiteSpace(zoi.Site))
             text.Append("  At: ").AppendLine(zoi.Site);
@@ -98,12 +120,22 @@ public static class HouseholdContextBuilder
             text.Append("  Relationships: ").AppendLine(string.Join("; ", relationships));
     }
 
-    private static string SummaryLine(ZoiInfo zoi)
+    /// <summary>"nitpick (with Paul Lez)" when the activity is aimed at someone they know.</summary>
+    private static string ActivityWithWhom(ZoiInfo zoi, ActivityInfo activity, GameSnapshot state)
+    {
+        var what = Phrases.Activity(activity);
+        if (activity.TargetId is not { } target || target == zoi.Id) return what;
+        var who = state.Zois.FirstOrDefault(z => z.Id == target)?.FullName
+                  ?? zoi.Relationships.FirstOrDefault(r => r.Id == target)?.Name;
+        return who is null ? what : $"{what} (with {who})";
+    }
+
+    private static string SummaryLine(ZoiInfo zoi, GameSnapshot state)
     {
         var parts = new List<string> { $"{zoi.FullName} ({Describe(zoi)})" };
         var emotion = Phrases.Emotion(zoi.Emotion);
         if (emotion is not null) parts.Add(emotion);
-        if (zoi.Activity is { } activity) parts.Add($"doing: {Phrases.Activity(activity)}");
+        if (zoi.Activity is { } activity) parts.Add($"doing: {ActivityWithWhom(zoi, activity, state)}");
         if (zoi.IsPossessed) parts.Add("the Zoi the player controls");
         return string.Join(", ", parts);
     }

@@ -118,6 +118,40 @@ public static partial class Phrases
         return string.Join(" ", text.Split(' ').Select(w => w.Skip(1).Any(char.IsUpper) ? w : w.ToLowerInvariant()));
     }
 
+    private static readonly string[] SocialPrefixes = ["Coop_", "Co_", "TalkPool_", "Talk_", "Special_", "Social_"];
+
+    private static readonly HashSet<string> SocialNoise = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "MF", "FM", "MM", "FF", "M", "F", "Main", "Sub", "Host", "Target", "Feedback", "Speaker", "Listener",
+        "Stand", "Sit", "Self", "Success", "Lv", "Short", "Long", "Common", "Normal", "Business", "Romance",
+        "Friendship", "Family", "Spouse", "Lover", "Friend", "Perspective", "Preference", "Skill", "Talk", "Pool",
+        "MaleToFemale", "FemaleToMale", "MaleToMale", "FemaleToFemale", "Male", "Female",
+    };
+
+    /// <summary>
+    /// Readable words for a social interaction the game has no menu name for: "Talk_Karma_Push" →
+    /// "push". Null when only codes are left ("Co_Friendship_G10_2", ordinary small talk), so it isn't
+    /// reported as if it meant something.
+    /// </summary>
+    public static string? SocialWords(string interactionId)
+    {
+        var name = interactionId;
+        foreach (var prefix in SocialPrefixes)
+        {
+            if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                name = name[prefix.Length..];
+                break;
+            }
+        }
+
+        var words = name.Split('_', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => !w.Any(char.IsDigit) && !SocialNoise.Contains(w) && !w.Equals("Karma", StringComparison.OrdinalIgnoreCase))
+            .Select(w => Words(w).ToLowerInvariant())
+            .ToArray();
+        return words.Length == 0 ? null : string.Join(" ", words);
+    }
+
     /// <summary>"Trait_Romantic_ExpressAffection" → "express affection".</summary>
     public static string Hope(string hopeId)
     {

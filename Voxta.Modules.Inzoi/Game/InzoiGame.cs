@@ -42,7 +42,7 @@ public sealed class InzoiGame : IAsyncDisposable
     private static readonly TimeSpan OfflineRetryDelay = TimeSpan.FromSeconds(15);
 
     /// <summary>Job status, wishes and relationships change slowly; read them every this many polls.</summary>
-    private const int SlowDetailsEvery = 6;
+    private const int SlowDetailsEvery = 4;
 
     private readonly McpClient _client;
     private readonly GameReader _reader;
@@ -60,6 +60,9 @@ public sealed class InzoiGame : IAsyncDisposable
 
     /// <summary>The most recent snapshot. Kept after the game closes, so a chat can still say what it last saw.</summary>
     public GameSnapshot? State { get; private set; }
+
+    /// <summary>What happened in the household lately, for the characters' context.</summary>
+    public HappeningsLog Happenings { get; } = new();
 
     public bool IsConnected { get; private set; }
 
@@ -135,9 +138,12 @@ public sealed class InzoiGame : IAsyncDisposable
                 LogProblems();
 
                 var previous = State;
+                var events = EventDetector.Compare(previous, snapshot);
+                if (snapshot.InGame) await RecordHappeningsAsync(snapshot, events, cancellationToken);
+
                 State = snapshot;
                 Raise(StateChanged, snapshot);
-                foreach (var gameEvent in EventDetector.Compare(previous, snapshot))
+                foreach (var gameEvent in events)
                 {
                     _logger.LogDebug("inZOI event {Kind}: {Text}", gameEvent.Kind, gameEvent.Text);
                     Raise(EventReceived, gameEvent);
@@ -170,6 +176,56 @@ public sealed class InzoiGame : IAsyncDisposable
             {
                 return;
             }
+        }
+    }
+
+    /// <summary>Adds this read's social interactions and events to the household's recent history.</summary>
+    private async Task RecordHappeningsAsync(GameSnapshot snapshot, List<GameEvent> events, CancellationToken cancellationToken)
+    {
+        Happenings.SetHousehold(snapshot.HouseholdId);
+        var time = snapshot.World?.Time;
+
+        foreach (var (actor, targetId, targetName, interaction) in HappeningsLog.SocialNow(snapshot))
+        {
+            if (!Happenings.IsNewSocial(actor.Id, targetId, interaction)) continue;
+            var what = await DescribeInteractionAsync(actor.Id, targetId, interaction, cancellationToken);
+            if (what is null) continue;
+            var text = $"{actor.FullName} → {targetName}: {what}";
+            _logger.LogDebug("inZOI social: {Text} ({Interaction})", text, interaction);
+            Happenings.Add(new Happening(DateTimeOffset.UtcNow, time, [actor.Id, targetId], text));
+        }
+
+        foreach (var gameEvent in events.Where(e => e.Kind != "new_wish"))
+            Happenings.Add(new Happening(DateTimeOffset.UtcNow, time, gameEvent.ZoiId is { } id ? [id, .. gameEvent.OtherIds] : gameEvent.OtherIds, gameEvent.Text));
+    }
+
+    private readonly Dictionary<string, string?> _interactionNames = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The game's own name for a social interaction ("Nitpick", "Give Heartfelt Hug"), from the menu the
+    /// actor would see for that target. Interactions that aren't in that menu (the listener's side of a
+    /// talk, a reaction) fall back to readable words from their id, or are left out when that says nothing.
+    /// </summary>
+    private async Task<string?> DescribeInteractionAsync(long actorId, long targetId, string interactionId, CancellationToken cancellationToken)
+    {
+        lock (_interactionNames)
+        {
+            if (_interactionNames.TryGetValue(interactionId, out var known)) return known;
+        }
+
+        var offers = await ListInteractionsAsync(actorId, targetId, cancellationToken);
+        lock (_interactionNames)
+        {
+            foreach (var offer in offers)
+            {
+                if (!string.IsNullOrWhiteSpace(offer.DisplayName))
+                    _interactionNames.TryAdd(offer.BagId, offer.DisplayName.Trim());
+            }
+
+            if (_interactionNames.TryGetValue(interactionId, out var found)) return found;
+            var words = Household.Phrases.SocialWords(interactionId);
+            _interactionNames[interactionId] = words;
+            return words;
         }
     }
 

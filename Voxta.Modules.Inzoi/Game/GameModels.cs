@@ -134,4 +134,7 @@ public sealed record GameEvent
 
     /// <summary>0 trivia, 1 notable, 2 important.</summary>
     public int Importance { get; init; }
+
+    /// <summary>Other Zois it is about, e.g. the one a relationship soured with.</summary>
+    public long[] OtherIds { get; init; } = [];
 }

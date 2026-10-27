@@ -118,9 +118,14 @@ they'd notice:
 - for each Zoi in the chat: age, emotion, what they're doing right now, where they are, needs that
   are low, job and whether they're at work, current wishes, and their closer relationships
 - a line about everyone else in the household
+- **what just happened:** a running list of the last half hour: social interactions between the
+  Zois and with people they know (in the game's own words, e.g. "Paul Lez → Juve Lez: Nitpick"),
+  feelings changing, relationships taking a hit or growing closer, new jobs, weddings. A mood alone
+  says little; the argument right before it is what lets a character react like a person would
 
-Events a character hears about (depending on the **Game events** setting): a strong new emotion, a
-need running low, a new wish, a new job or promotion, a wedding, someone moving in or out.
+Events a character hears about (depending on the **Game events** setting): a new emotion (bad ones
+count more), a need running low, a falling-out or making up with someone, a new wish, a new job or
+promotion, a wedding, someone moving in or out.
 
 ## Troubleshooting
 

@@ -23,6 +23,11 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
     /// <summary>Needs and activities change every few seconds; the context is rebuilt at most this often.</summary>
     private static readonly TimeSpan ContextDebounce = TimeSpan.FromSeconds(3);
 
+    /// <summary>How far back the household's recent history goes in the context, in real time.</summary>
+    private static readonly TimeSpan RecentWindow = TimeSpan.FromMinutes(30);
+
+    private const int MaxRecent = 12;
+
     private readonly IChatSessionChatAugmentationApi _session;
     private readonly InzoiGame _game;
     private readonly InzoiSettings _settings;
@@ -144,7 +149,8 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
                 state,
                 _game.IsConnected,
                 Participants(state),
-                new HouseholdContextBuilder.Options(_settings.UserRole, _settings.CustomUserRole)
+                new HouseholdContextBuilder.Options(_settings.UserRole, _settings.CustomUserRole),
+                _game.Happenings.Recent(RecentWindow, MaxRecent)
             );
 
             // Most reads change nothing the characters would notice (a need moving from 63 to 61).
@@ -171,7 +177,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
 
         // Events about the Zois in this chat, plus anything big enough to concern the whole household.
         var participants = Participants(_game.State);
-        var concernsChat = gameEvent.ZoiId is { } id && participants.ContainsKey(id);
+        var concernsChat = (gameEvent.ZoiId is { } id && participants.ContainsKey(id)) || gameEvent.OtherIds.Any(participants.ContainsKey);
         if (!concernsChat && gameEvent.Importance < 2) return;
 
         _ = Task.Run(async () =>
