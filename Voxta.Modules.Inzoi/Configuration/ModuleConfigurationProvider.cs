@@ -125,6 +125,25 @@ public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IMod
         DefaultValue = true,
     };
 
+    public static readonly FormBooleanField AllowExpressions = new()
+    {
+        Name = "AllowExpressions",
+        Label = "Characters show emotions and gestures",
+        Text = "When a reply has a strong reaction, the character's Zoi shows it with inZOI's own animations and a matching face: laughing, giggling, crying, being angry or scared, clapping, cheering, dancing, a cat-heart pose and more. Uses Voxta's action inference.",
+        DefaultValue = true,
+    };
+
+    public static readonly FormMultilineField CustomAnimations = new()
+    {
+        Name = "CustomAnimations",
+        Label = "Your own animations",
+        Text = "Extra emotions and gestures the characters can choose, one per line: `name = AnimationId` for any game or mod animation (find ids with the Animation Player mod, F9), or `name = ai:3` for your AI emote in slot 3. Names you use here replace a built-in of the same name.",
+        Required = false,
+        DefaultValue = "",
+        Rows = 5,
+        Placeholder = "new year bow = Hanbok_NewYearBow\nmy victory dance = ai:1",
+    };
+
     public static readonly FormChoicesField GameEvents = new()
     {
         Name = "GameEvents",
@@ -170,6 +189,8 @@ public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IMod
             SpeakingFaces,
             SwitchToSpeaker,
             AllowActions,
+            AllowExpressions,
+            CustomAnimations,
             GameEvents,
             ReactCooldownSeconds
         ));

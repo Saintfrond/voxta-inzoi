@@ -47,6 +47,8 @@ The defaults work when inZOI and Voxta run on the same PC. Settings, under the m
 | Facial expressions while speaking | The Zoi's face follows the reply (laughing, sad, angry, surprised, smitten), otherwise their emotion. |
 | Switch control to the speaker | Moves the camera to whoever speaks by taking control of them. Off by default. |
 | Characters can act in the game | Characters make their Zoi do what they do in the chat (kiss, hug, cook, sleep...). Needs Voxta action inference. |
+| Characters show emotions and gestures | Strong reactions play inZOI's own emotion animations with a matching face (laugh, cry, clap, cheer...). Needs Voxta action inference. |
+| Your own animations | `name = AnimationId` or `name = ai:3` lines: extra gestures the characters can choose, including your AI emotes. |
 | Game events | Ignore events, tell characters quietly, or let them react right away. |
 | Seconds between reactions | Limits how often a character speaks up on its own. |
 
@@ -87,6 +89,25 @@ The module picks the matching interaction from what the game offers right now (t
 click), so the Zoi walks over and really does it. If the game doesn't offer it (too far apart, not
 close enough yet for a kiss, nothing to cook on), the character is told quietly so it doesn't
 pretend it happened. Cooking opens the game's recipe window for you to pick a dish.
+
+## Emotions and gestures
+
+With **Characters show emotions and gestures** on, a reply with a strong reaction makes the Zoi show
+it with their whole body, using the game's own emotion animations and a matching face: laugh,
+giggle, be amused, happy, delighted, excited, clap, cheer someone on, be proud, smitten, touched,
+have an idea, think it over, be sad, teary, cry, heartbroken, annoyed, angry, furious, stressed,
+disgusted, refuse, nervous, scared, terrified, surprised, shocked, embarrassed, humiliated, tired,
+yawn, stretch, sigh, bored, dance, a silly dance, enjoy the music, a cat-heart or selfie pose, show
+off muscles, pray, playfully scare someone. It runs in its own action layer, so a character can
+kiss someone and laugh in the same reply. The emotion replaces the talking gestures for that reply.
+
+Each emotion lists several of the game's animations; the first that suits the Zoi (age, gender,
+sitting or standing) plays. A Zoi who is sleeping, bathing, cooking or driving isn't interrupted.
+
+**Your own animations** adds more: `name = AnimationId` for any game or mod animation, or
+`name = ai:3` for the AI emote you made in the game in slot 3. The
+[Animation Player](https://github.com/Schrubbdiwupp/inzoi-animation-player) mod (F9) is a handy way
+to browse and preview animation ids first.
 
 ## What the characters know
 

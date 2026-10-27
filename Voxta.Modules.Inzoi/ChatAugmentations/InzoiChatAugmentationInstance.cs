@@ -29,6 +29,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
     private readonly ILogger _logger;
     private readonly ZoiMatcher _matcher;
     private readonly GameActions _actions;
+    private readonly Expressions.Custom[] _customExpressions;
     private string? _registeredActionTargets;
     private readonly CancellationTokenSource _cts;
     private IAsyncDisposable? _lease;
@@ -61,6 +62,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
         _logger = logger;
         _matcher = new ZoiMatcher(settings.NameAliases);
         _actions = new GameActions(game, logger);
+        _customExpressions = Expressions.ParseCustom(settings.CustomAnimations);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(session.Abort);
         // Everyone in the chat from the start, so every Zoi's state is there for the first reply.
         // Characters a scenario brings in later are picked up when they first speak.
@@ -249,6 +251,11 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
                 RunGameAction(selected.Character?.Name, selected.Action, selected.Arguments);
                 break;
 
+            case ActionInferenceSelectedActionScriptEvent selected
+                when selected.Action is Expressions.ExpressAction:
+                Express(selected.Character?.Name, selected.Arguments);
+                break;
+
             case TypingEndScriptEvent:
                 _userTyping = false;
                 break;
@@ -295,7 +302,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
     /// </summary>
     private void ScheduleActionRegistration(GameSnapshot state)
     {
-        if (!_settings.AllowActions || !state.InGame || state.Zois.Length == 0) return;
+        if ((!_settings.AllowActions && !_settings.AllowExpressions) || !state.InGame || state.Zois.Length == 0) return;
         var targets = string.Join("|", state.Zois.Select(z => z.FirstName).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
         if (targets == _registeredActionTargets) return;
         _registeredActionTargets = targets;
@@ -304,7 +311,13 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
         {
             try
             {
-                await _session.SetActions(InzoiConstants.ContextKey, GameActions.Definitions(state.Zois.Select(z => z.FirstName)), _cts.Token);
+                await _session.SetActions(
+                    InzoiConstants.ContextKey,
+                    GameActions.Definitions(
+                        state.Zois.Select(z => z.FirstName),
+                        _settings.AllowActions,
+                        _settings.AllowExpressions ? Expressions.Choices(_customExpressions) : null),
+                    _cts.Token);
                 _logger.LogInformation("In-game actions available to the characters (household: {Zois})", targets.Replace("|", ", "));
             }
             catch (OperationCanceledException)
@@ -349,6 +362,133 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
             }
         });
     }
+
+    // ---- Emotions and gestures (laugh, cry, clap...) ----
+
+    /// <summary>Until when each Zoi is busy showing an emotion: the talking gestures leave them alone meanwhile.</summary>
+    private readonly ConcurrentDictionary<long, DateTimeOffset> _expressingUntil = new();
+
+    /// <summary>Animations a Zoi's age, gender or posture doesn't allow, so they aren't tried again.</summary>
+    private readonly ConcurrentDictionary<(long Zoi, string Animation), byte> _refused = new();
+
+    private void Express(string? characterName, Dictionary<string, object>? arguments)
+    {
+        if (!_settings.AllowExpressions || characterName is null) return;
+        var choice = arguments is not null && arguments.TryGetValue("expression", out var v) ? v?.ToString()?.Trim() : null;
+        if (string.IsNullOrWhiteSpace(choice)) return;
+        var zoi = Match(characterName, _game.State);
+        if (zoi is null || !_game.IsConnected) return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ExpressAsync(zoi, choice, _cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // The chat ended.
+            }
+            catch (Exception exc)
+            {
+                _logger.LogWarning(exc, "Could not show '{Expression}' in inZOI", choice);
+            }
+        });
+    }
+
+    private async Task ExpressAsync(ZoiInfo zoi, string choice, CancellationToken cancellationToken)
+    {
+        if (Expressions.IsBusy(zoi.Activity))
+        {
+            _logger.LogInformation("{Zoi} is busy ({Activity}); not interrupting it to {Expression}", zoi.FullName, zoi.Activity!.InteractionId, choice);
+            return;
+        }
+
+        string? played = null;
+        double length = 6;
+        string? face = null;
+
+        // Claim the Zoi before the game answers, so talking gestures starting meanwhile keep off,
+        // and stop the ones already running: the emotion replaces them for the rest of the reply.
+        _expressingUntil[zoi.Id] = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(8);
+        Interlocked.Exchange(ref _performance, null)?.Cancel();
+
+        var custom = _customExpressions.FirstOrDefault(c => c.Choice.Equals(choice, StringComparison.OrdinalIgnoreCase));
+        if (custom is { AiSlot: { } slot })
+        {
+            var bag = Expressions.AiMotionPrefix + slot.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var problem = await _game.ExecuteInteractionAsync(zoi.Id, bag, zoi.Id, cancellationToken);
+            if (problem is not null)
+            {
+                _logger.LogWarning("AI emote {Slot} ('{Choice}') didn't start for {Zoi}: {Problem}", slot + 1, choice, zoi.FullName, problem);
+                _expressingUntil.TryRemove(zoi.Id, out _);
+                return;
+            }
+
+            played = bag;
+            length = 10; // AI emotes don't report their length; long enough to keep the talking gestures off them.
+        }
+        else
+        {
+            IEnumerable<string> candidates;
+            if (custom is { AnimationId: { } id })
+            {
+                candidates = [id];
+            }
+            else if (Expressions.FindBuiltin(choice) is { } builtin)
+            {
+                candidates = Expressions.Candidates(builtin, Performance.LooksSeated(zoi.Activity), zoi.Gender);
+                face = builtin.Face;
+            }
+            else
+            {
+                _logger.LogDebug("Unknown expression '{Expression}'", choice);
+                _expressingUntil.TryRemove(zoi.Id, out _);
+                return;
+            }
+
+            foreach (var animation in candidates)
+            {
+                if (_refused.ContainsKey((zoi.Id, animation))) continue;
+                var problem = await _game.TryPlayMotionAsync(zoi.Id, animation, cancellationToken);
+                if (problem is null)
+                {
+                    played = animation;
+                    length = await _game.GetMotionLengthAsync(zoi.Id, animation, cancellationToken) ?? length;
+                    break;
+                }
+
+                _refused.TryAdd((zoi.Id, animation), 0);
+                _logger.LogDebug("{Animation} doesn't suit {Zoi}: {Problem}", animation, zoi.FullName, problem);
+            }
+
+            if (played is null)
+            {
+                _logger.LogInformation("None of the animations for '{Expression}' suit {Zoi} right now", choice, zoi.FullName);
+                _expressingUntil.TryRemove(zoi.Id, out _);
+                return;
+            }
+        }
+
+        _expressingUntil[zoi.Id] = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(length);
+        _logger.LogInformation("{Zoi}: {Expression} ({Animation}, {Length:0.0}s)", zoi.FullName, choice, played, length);
+
+        if (face is not null && _settings.SpeakingFaces)
+        {
+            await _game.SetFaceAsync(zoi.Id, face, cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(length), cancellationToken);
+            // Unless a newer emotion took over, back to the face their mood gives them.
+            if (_expressingUntil.TryGetValue(zoi.Id, out var until) && until <= DateTimeOffset.UtcNow + TimeSpan.FromSeconds(0.5))
+            {
+                var now = _game.State?.Zois.FirstOrDefault(z => z.Id == zoi.Id);
+                if (await _game.FaceForEmotionAsync(now?.Emotion, cancellationToken) is { } rest)
+                    await _game.SetFaceAsync(zoi.Id, rest, cancellationToken);
+            }
+        }
+    }
+
+    private bool IsExpressing(long zoiId) =>
+        _expressingUntil.TryGetValue(zoiId, out var until) && until > DateTimeOffset.UtcNow;
 
     // ---- The Zoi performing the reply ----
 
@@ -421,6 +561,9 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
             if (_settings.SwitchToSpeaker && _game.State?.PossessedId != zoi.Id)
                 await _game.PossessAsync(zoi.Id, cancellationToken);
 
+            // The character chose an emotion or gesture for this reply: that's the performance.
+            if (IsExpressing(zoi.Id)) return;
+
             var replyFace = _settings.SpeakingFaces ? Performance.FaceFor(speech.Text) : null;
             var face = replyFace ?? (_settings.SpeakingFaces ? await _game.FaceForEmotionAsync(zoi.Emotion, cancellationToken) : null);
             if (face is not null)
@@ -438,6 +581,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
             var next = Random.Shared.Next(animations.Count);
             while (DateTimeOffset.UtcNow < until)
             {
+                if (IsExpressing(zoi.Id)) return;
                 var animation = animations[next++ % animations.Count];
                 if (!await _game.PlayMotionAsync(zoi.Id, animation, cancellationToken)) return;
                 lastAnimation = animation;

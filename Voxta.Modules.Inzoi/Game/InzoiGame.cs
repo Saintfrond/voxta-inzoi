@@ -211,6 +211,28 @@ public sealed class InzoiGame : IAsyncDisposable
     public Task<bool> PlayMotionAsync(long zoiId, string animId, CancellationToken cancellationToken) =>
         TryCallAsync("motion_play", new { anim_id = animId, entity_id = Id(zoiId) }, cancellationToken);
 
+    /// <summary>
+    /// Plays an animation and says why not when the game refuses it (wrong age, gender or posture,
+    /// unknown id). For trying a list of candidates, where a refusal is expected and not worth a warning.
+    /// </summary>
+    public async Task<string?> TryPlayMotionAsync(long zoiId, string animId, CancellationToken cancellationToken)
+    {
+        if (!IsConnected) return "the game isn't running";
+        try
+        {
+            await _client.CallToolAsync("motion_play", new { anim_id = animId, entity_id = Id(zoiId) }, cancellationToken);
+            return null;
+        }
+        catch (McpToolException exc)
+        {
+            return exc.Message;
+        }
+        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or IOException)
+        {
+            return "the game didn't answer";
+        }
+    }
+
     public Task<bool> StopMotionAsync(long zoiId, string animId, CancellationToken cancellationToken) =>
         TryCallAsync("motion_stop", new { anim_id = animId, entity_id = Id(zoiId) }, cancellationToken);
 

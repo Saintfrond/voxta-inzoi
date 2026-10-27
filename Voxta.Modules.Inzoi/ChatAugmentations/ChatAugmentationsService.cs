@@ -89,6 +89,8 @@ public class ChatAugmentationsService(
             SpeakingFaces: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.SpeakingFaces),
             SwitchToSpeaker: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.SwitchToSpeaker),
             AllowActions: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.AllowActions),
+            AllowExpressions: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.AllowExpressions),
+            CustomAnimations: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.CustomAnimations),
             GameEvents: ModuleConfiguration.GetRequired(ModuleConfigurationProvider.GameEvents),
             ReactCooldown: TimeSpan.FromSeconds(cooldown)
         );
@@ -110,6 +112,8 @@ public sealed record InzoiSettings(
     bool SpeakingFaces,
     bool SwitchToSpeaker,
     bool AllowActions,
+    bool AllowExpressions,
+    string? CustomAnimations,
     string GameEvents,
     TimeSpan ReactCooldown
 );

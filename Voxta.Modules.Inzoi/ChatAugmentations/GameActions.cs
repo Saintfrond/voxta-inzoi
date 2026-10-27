@@ -13,11 +13,40 @@ namespace Voxta.Modules.Inzoi.ChatAugmentations;
 /// </summary>
 public sealed class GameActions(InzoiGame game, ILogger logger)
 {
-    /// <summary>The action definitions for this household. Targets are the other Zois' first names.</summary>
-    public static ScenarioActionDefinition[] Definitions(IEnumerable<string> zoiNames)
+    /// <summary>
+    /// The action definitions for this household. Targets are the other Zois' first names.
+    /// <paramref name="expressionChoices"/> null leaves out the emotions and gestures.
+    /// </summary>
+    public static ScenarioActionDefinition[] Definitions(IEnumerable<string> zoiNames, bool gameActions, string[]? expressionChoices)
     {
         var names = zoiNames.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var actions = new List<ScenarioActionDefinition>();
+
+        if (expressionChoices is { Length: > 0 })
+        {
+            actions.Add(new ScenarioActionDefinition
+            {
+                Name = Expressions.ExpressAction,
+                // Its own layer: showing a feeling doesn't use up the chance to also do something.
+                Layer = Expressions.Layer,
+                Description = "Your Zoi shows a clear emotion or gesture with their whole body in the game (inZOI): laughing, crying, clapping, being angry, a pose... Use it when your reply has a strong, visible reaction. Not for calm, ordinary talk.",
+                ShortDescription = "Show an emotion or gesture",
+                Timing = FunctionTiming.AfterAssistantMessage,
+                Arguments =
+                [
+                    new FunctionArgumentDefinition
+                    {
+                        Name = "expression",
+                        Type = FunctionArgumentType.String,
+                        Description = "The emotion or gesture that fits the reply best",
+                        Required = true,
+                        Choices = expressionChoices,
+                    },
+                ],
+            });
+        }
+
+        if (!gameActions) return actions.ToArray();
 
         if (names.Length > 0)
         {
