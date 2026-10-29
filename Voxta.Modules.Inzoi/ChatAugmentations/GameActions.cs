@@ -53,7 +53,7 @@ public sealed class GameActions(InzoiGame game, ILogger logger)
             actions.Add(new ScenarioActionDefinition
             {
                 Name = ActionCatalog.InteractAction,
-                Description = "Your Zoi does something with another member of the household in the game (inZOI), like kissing, hugging or dancing with them. Use it when you actually do that in your reply, not when you only talk about it.",
+                Description = "Your Zoi does something with another member of the household in the game (inZOI), like kissing, hugging or dancing with them. Use it when your reply does it, starts it, or agrees to it right now. Not for things only mentioned or planned for later.",
                 ShortDescription = "Do something with another Zoi",
                 Timing = FunctionTiming.AfterAssistantMessage,
                 Arguments =
@@ -81,7 +81,7 @@ public sealed class GameActions(InzoiGame game, ILogger logger)
         actions.Add(new ScenarioActionDefinition
         {
             Name = ActionCatalog.ActivityAction,
-            Description = "Your Zoi starts an everyday activity at home in the game (inZOI), like cooking, eating, sleeping or watching TV. Use it when you actually go and do that in your reply, not when you only talk about it.",
+            Description = "Your Zoi starts an everyday activity or chore at home in the game (inZOI), like cooking, eating, sleeping, watching TV, cleaning the floor, doing the laundry or the dishes. Use it when your reply does it, starts it, or agrees to do it now (\"okay, I'll mop the floor\", \"fine, I'm doing the dishes\"). Not for things only mentioned, planned for later, or asked of someone else.",
             ShortDescription = "Start an activity at home",
             Timing = FunctionTiming.AfterAssistantMessage,
             Arguments =
@@ -158,10 +158,16 @@ public sealed class GameActions(InzoiGame game, ILogger logger)
         if (objects.Count == 0)
             return $"{actor.FirstName} wanted to {activity.Choice}, but the game can only find things to use when the Zois are at home.";
 
-        foreach (var obj in ActionCatalog.Candidates(objects, o => o.TableId, activity.Objects, activity.AvoidObjects).Take(5))
+        var notNeeded = false;
+        foreach (var obj in ActionCatalog.Candidates(objects, o => o.TableId, activity.Objects, activity.AvoidObjects).Take(activity.MaxObjects))
         {
-            var offer = ActionCatalog.Best(await game.ListInteractionsAsync(actor.Id, obj.Id, cancellationToken), activity.Names, activity.AvoidNames);
-            if (offer is null) continue;
+            var offers = await game.ListInteractionsAsync(actor.Id, obj.Id, cancellationToken);
+            var offer = ActionCatalog.Best(offers, activity.Names, activity.AvoidNames);
+            if (offer is null)
+            {
+                notNeeded |= ActionCatalog.OfferedButNotNeeded(offers, activity.Names, activity.AvoidNames);
+                continue;
+            }
 
             var problem = await game.ExecuteInteractionAsync(actor.Id, offer.BagId, obj.Id, cancellationToken);
             logger.LogInformation("{Actor}: {Interaction} at {Object} ({Bag}) {Result}", actor.FullName, offer.DisplayName, obj.TableId, offer.BagId, problem ?? "queued");
@@ -169,6 +175,17 @@ public sealed class GameActions(InzoiGame game, ILogger logger)
                 return $"In the game, {actor.FirstName} goes to: {offer.DisplayName} ({Phrases.InteractionWords(obj.TableId)}).";
         }
 
+        // Some chores need no object: a Zoi can mop with a flat mop of their own.
+        if (activity.SelfFallback is { } self)
+        {
+            var problem = await game.ExecuteInteractionAsync(actor.Id, self, actor.Id, cancellationToken);
+            logger.LogInformation("{Actor}: {Interaction} (on their own) {Result}", actor.FullName, self, problem ?? "queued");
+            if (problem is null)
+                return $"In the game, {actor.FirstName} starts to {activity.Choice}.";
+        }
+
+        if (notNeeded)
+            return $"{actor.FirstName} wanted to {activity.Choice}, but in the game there's nothing that needs it right now (already done).";
         return $"{actor.FirstName} wanted to {activity.Choice}, but there's nothing at home to do that with right now.";
     }
 }

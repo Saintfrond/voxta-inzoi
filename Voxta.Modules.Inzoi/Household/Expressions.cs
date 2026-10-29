@@ -134,5 +134,5 @@ public static class Expressions
         return BusyWords.Any(w => id.Contains(w, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static readonly string[] BusyWords = ["Sleep", "Bath", "Shower", "Toilet", "Drive", "Swim", "Cook", "Craft"];
+    private static readonly string[] BusyWords = ["Sleep", "Bath", "Shower", "Toilet", "Drive", "Swim", "Cook", "Craft", "Mopping", "Vacuum", "VC_", "Laundry", "WashingMachine", "WashDishes", "Clean", "Repair"];
 }

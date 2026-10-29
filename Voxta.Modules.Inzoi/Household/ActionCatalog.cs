@@ -15,7 +15,16 @@ public static class ActionCatalog
     public sealed record Social(string Choice, string[] Names);
 
     /// <summary>A choice, the objects it can happen at (by table id), and the interaction names to look for there.</summary>
-    public sealed record Activity(string Choice, string[] Objects, string[] Names, string[]? AvoidObjects = null, string[]? AvoidNames = null);
+    /// <param name="MaxObjects">How many kinds of object to ask about; repairs look through many appliances for the broken one.</param>
+    /// <param name="SelfFallback">An interaction the Zoi can do on their own when no object offers it (mopping with a flat mop).</param>
+    public sealed record Activity(
+        string Choice,
+        string[] Objects,
+        string[] Names,
+        string[]? AvoidObjects = null,
+        string[]? AvoidNames = null,
+        int MaxObjects = 5,
+        string? SelfFallback = null);
 
     public static readonly Social[] SocialChoices =
     [
@@ -68,6 +77,18 @@ public static class ActionCatalog
         new("listen to music", ["Audio", "Speaker", "Radio", "Stereo"], ["Listen", "Music", "Turn On", "Play"]),
         new("brush teeth", ["SinkBowl", "Washstand", "Sink"], ["Brush Teeth"]),
         new("go to the toilet", ["Toilet"], ["Use"], AvoidNames: ["Flush"]),
+
+        // Chores. The game only offers most of them when there is something to do (dirty dishes, a full bin, a broken appliance).
+        new("clean the floor", ["Mop", "Vaccum", "Vacuum", "DEV_DustDecal", "Dust", "Dirt"], ["Use (Clean", "Use Vacuum Cleaner", "Use Flat Mop", "Clean"], SelfFallback: "Self_Mopping_Home"),
+        new("vacuum", ["Vaccum", "Vacuum"], ["Use (Clean", "Use Vacuum Cleaner", "Use Premium Vacuum Cleaner", "Use"]),
+        new("do the laundry", ["WashingMachine", "Dryer", "AirDresser"], ["Do Laundry"], AvoidNames: ["Repair"]),
+        new("wash the dishes", ["SinkBowl", "Sink", "Dishwasher", "D_Sink", "U_Sink"], ["Wash the Dishes", "Insert Dishes", "Clear Off the Sink"], MaxObjects: 8),
+        new("take out the trash", ["TrashCan"], ["Empty Trash Can", "Throw Away Trash"], MaxObjects: 6),
+        new("clean the bathroom", ["Bath", "Shower", "Toilet", "Washstand"], ["Clean the Bathtub", "Clean"], AvoidNames: ["Boredom"], MaxObjects: 8),
+        new("clean the kitchen", ["D_Sink", "D_CornerSink", "Sink", "Dishwasher", "KitchenRange"], ["Clear Off the Sink", "Clean"], AvoidNames: ["Boredom"], MaxObjects: 8),
+        new("tidy up", ["Bookshelf", "Bookcase", "Closet", "DecoFloorShelf"], ["Tidy Up", "Clean"], MaxObjects: 6),
+        new("water the plants", ["GrowFlower", "GrowTree", "OutPot", "Pot", "Plant"], ["Water"], AvoidNames: ["Share Feelings", "Lazily"], MaxObjects: 10),
+        new("repair something", ["KitchenRange", "Fridge", "WashingMachine", "Dryer", "Dishwasher", "Toilet", "Bath", "Shower", "Washstand", "SinkBowl", "TV", "Computer", "Laptop", "Microwave", "CoffeeMachine", "Audio"], ["Repair"], AvoidObjects: ["TVTable"], MaxObjects: 16),
     ];
 
     public static Social? FindSocial(string? choice) =>
@@ -75,6 +96,10 @@ public static class ActionCatalog
 
     public static Activity? FindActivity(string? choice) =>
         ActivityChoices.FirstOrDefault(a => a.Choice.Equals(choice?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>True when the game lists a matching interaction but greys it out: there's nothing to do right now (clean dishes, an empty bin).</summary>
+    public static bool OfferedButNotNeeded(IEnumerable<Offer> offers, string[] names, string[]? avoid = null) =>
+        Best(offers.Select(o => o with { Enabled = true }), names, avoid) is not null;
 
     /// <summary>One thing the game offers, as interaction.list_available reports it.</summary>
     public sealed record Offer(string BagId, string DisplayName, bool Enabled);

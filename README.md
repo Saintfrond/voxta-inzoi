@@ -84,11 +84,15 @@ when a character actually does something in their reply, their Zoi does it in th
 - **at home:** cook, eat, drink water, sleep, take a nap, take a bath, watch TV, play video games,
   use the computer, do yoga, work out, meditate, play chess, relax or lie down on the sofa, listen
   to music, brush teeth, go to the toilet
+- **chores:** clean the floor (mop or vacuum), vacuum, do the laundry, wash the dishes, take out
+  the trash, clean the bathroom, clean the kitchen, tidy up, water the plants, repair something
 
 The module picks the matching interaction from what the game offers right now (the same menu you'd
 click), so the Zoi walks over and really does it. If the game doesn't offer it (too far apart, not
 close enough yet for a kiss, nothing to cook on), the character is told quietly so it doesn't
-pretend it happened. Cooking opens the game's recipe window for you to pick a dish.
+pretend it happened. A character agreeing to do something now ("okay, I'll mop the floor") starts
+it too. Most chores are only offered by the game when there's something to do (dirty dishes, a full
+bin, a broken appliance); otherwise the character hears it's already done. Cooking opens the game's recipe window for you to pick a dish.
 
 ## Emotions and gestures
 
