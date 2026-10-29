@@ -46,7 +46,7 @@ The defaults work when inZOI and Voxta run on the same PC. Settings, under the m
 | Zois gesture while speaking | The speaking Zoi plays inZOI's own conversation animations (friendly, normal or upset; standing or seated). |
 | Facial expressions while speaking | The Zoi's face follows the reply (laughing, sad, angry, surprised, smitten), otherwise their emotion. |
 | Switch control to the speaker | Moves the camera to whoever speaks by taking control of them. Off by default. |
-| Characters can act in the game | Characters make their Zoi do what they do in the chat (kiss, hug, cook, sleep...). Needs Voxta action inference. |
+| Characters can act in the game | Characters make their Zoi do whatever they do in the chat, from the game's live menu. Needs Voxta action inference. |
 | Characters show emotions and gestures | Strong reactions play inZOI's own emotion animations with a matching face (laugh, cry, clap, cheer...). Needs Voxta action inference. |
 | Your own animations | `name = AnimationId` or `name = ai:3` lines: extra gestures the characters can choose, including your AI emotes. |
 | Game events | Ignore events, tell characters quietly, or let them react right away. |
@@ -75,24 +75,24 @@ control of the speaking Zoi, which moves the camera to them.
 ## Characters acting in the game
 
 With **Characters can act in the game** on, Voxta's action inference watches the conversation, and
-when a character actually does something in their reply, their Zoi does it in the game:
+when a character does something in their reply, or agrees to do it right now ("okay, I'll mop the
+floor"), their Zoi does it in the game. There is no fixed list: anything the game offers at that
+moment can be done.
 
-- **with another household member:** kiss, hug, hold hands, dance together, show affection,
-  compliment, tell a joke, tease, cheer up, high five, ask about their day, talk about memories,
-  gossip, ask on a date, take a selfie together, serenade, give a massage, cuddle on the sofa,
-  play games together
-- **at home:** cook, eat, drink water, sleep, take a nap, take a bath, watch TV, play video games,
-  use the computer, do yoga, work out, meditate, play chess, relax or lie down on the sofa, listen
-  to music, brush teeth, go to the toilet
-- **chores:** clean the floor (mop or vacuum), vacuum, do the laundry, wash the dishes, take out
-  the trash, clean the bathroom, clean the kitchen, tidy up, water the plants, repair something
+How it works:
 
-The module picks the matching interaction from what the game offers right now (the same menu you'd
-click), so the Zoi walks over and really does it. If the game doesn't offer it (too far apart, not
-close enough yet for a kiss, nothing to cook on), the character is told quietly so it doesn't
-pretend it happened. A character agreeing to do something now ("okay, I'll mop the floor") starts
-it too. Most chores are only offered by the game when there's something to do (dirty dishes, a full
-bin, a broken appliance); otherwise the character hears it's already done. Cooking opens the game's recipe window for you to pick a dish.
+1. The character's action says what, in plain words ("mop the floor", "give Paul a massage",
+   "change into pajamas"), and with whom.
+2. The module reads the game's live menu: everything the Zoi could click right now on every object
+   at home, and toward the other Zoi (in a typical house around 300 entries).
+3. Word matching narrows that down; the chat's language model (the action inference service, or
+   the text generation one) picks the one entry that does what was meant, or none.
+4. The Zoi walks over and does it.
+
+If the game doesn't offer it (too far apart, not close enough yet for a kiss, nothing to cook on),
+or greys it out because there's nothing to do (clean dishes, an empty bin), the character is told
+quietly so it doesn't pretend it happened. Cooking opens the game's recipe window for you to pick a
+dish.
 
 ## Emotions and gestures
 

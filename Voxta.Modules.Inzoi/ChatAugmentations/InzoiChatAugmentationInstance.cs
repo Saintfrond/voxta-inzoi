@@ -5,6 +5,7 @@ using Voxta.Abstractions.Chats.Sessions;
 using Voxta.Abstractions.Model;
 using Voxta.Abstractions.Scripting.ActionScripts;
 using Voxta.Abstractions.Services.ChatAugmentations;
+using Voxta.Abstractions.Services.TextGen;
 using Voxta.Model.Shared;
 using Voxta.Modules.Inzoi.Game;
 using Voxta.Modules.Inzoi.Household;
@@ -253,7 +254,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
                 break;
 
             case ActionInferenceSelectedActionScriptEvent selected
-                when selected.Action is ActionCatalog.InteractAction or ActionCatalog.ActivityAction:
+                when selected.Action is GameActions.DoAction:
                 RunGameAction(selected.Character?.Name, selected.Action, selected.Arguments);
                 break;
 
@@ -338,6 +339,33 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
         });
     }
 
+    /// <summary>
+    /// A short, plain question to the chat's language model (picking a menu entry). The action
+    /// inference service first, as it's meant for exactly this; the text generation one if there's none.
+    /// </summary>
+    private async Task<string?> GenerateAsync(string system, string user, CancellationToken cancellationToken)
+    {
+        var request = TextGenGenerateRequest.Create(system, user, "") with { MaxNewTokens = 8, Temperature = 0 };
+        foreach (var service in new[] { ServiceTypes.ActionInference, ServiceTypes.TextGen })
+        {
+            try
+            {
+                var reply = await _session.GenerateAsync(service, request, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(reply)) return reply;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exc)
+            {
+                _logger.LogDebug(exc, "No answer from the {Service} service", service);
+            }
+        }
+
+        return null;
+    }
+
     private void RunGameAction(string? characterName, string action, Dictionary<string, object>? arguments)
     {
         if (!_settings.AllowActions || characterName is null) return;
@@ -354,7 +382,7 @@ public sealed class InzoiChatAugmentationInstance : IChatScriptEventsAugmentatio
             try
             {
                 var args = arguments?.ToDictionary(a => a.Key, a => (object?)a.Value, StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, object?>();
-                var outcome = await _actions.RunAsync(actor, state, action, args, _matcher, _cts.Token);
+                var outcome = await _actions.RunAsync(actor, state, args, _matcher, GenerateAsync, _cts.Token);
                 // The character should know whether it worked, so it doesn't describe a kiss that never happened next time.
                 await _session.SendSecretAsync($"[In the game: {outcome}]", _cts.Token);
             }

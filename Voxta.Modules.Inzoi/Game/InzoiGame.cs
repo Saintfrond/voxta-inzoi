@@ -362,17 +362,18 @@ public sealed class InzoiGame : IAsyncDisposable
     // ---- Interactions: making a Zoi do things ----
 
     /// <summary>What the actor could do with the target (a Zoi or an object) right now, as the game's own menu would offer it.</summary>
-    public async Task<IReadOnlyList<Household.ActionCatalog.Offer>> ListInteractionsAsync(long actorId, long targetId, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<Offer>> ListInteractionsAsync(long actorId, long targetId, CancellationToken cancellationToken)
     {
         if (!IsConnected) return [];
         try
         {
             var list = await _client.CallToolAsync("interaction_list_available", new { entity_id = Id(actorId), target_entity_id = Id(targetId) }, cancellationToken);
             return (GameReader.Get(list, "interactions") as System.Text.Json.Nodes.JsonArray ?? [])
-                .Select(i => new Household.ActionCatalog.Offer(
+                .Select(i => new Offer(
                     GameReader.Str(i, "interaction_bag_id") ?? "",
                     GameReader.Str(i, "display_name") ?? "",
-                    GameReader.Bool(i, "enabled") ?? true))
+                    GameReader.Bool(i, "enabled") ?? true,
+                    GameReader.Str(i, "hint")))
                 .Where(o => o.BagId.Length > 0)
                 .ToArray();
         }

@@ -121,7 +121,7 @@ public class ModuleConfigurationProvider : ModuleConfigurationProviderBase, IMod
     {
         Name = "AllowActions",
         Label = "Characters can act in the game",
-        Text = "Characters can make their Zoi do things in the game when they do them in the chat: kiss, hug or dance with another household member, cook, eat, sleep, watch TV and so on. Uses Voxta's action inference, so it needs an action inference service.",
+        Text = "Characters make their Zoi do whatever they do (or agree to do) in the chat, picked from the game's live menu: anything the Zoi could click right now at home or with a housemate. Uses Voxta's action inference, so it needs an action inference service.",
         DefaultValue = true,
     };
 
