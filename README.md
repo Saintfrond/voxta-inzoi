@@ -8,6 +8,10 @@ bubble above their head in the game.
 > **Status: 0.1, experimental.** Built against Voxta 1.13 (alpha) and inZOI 0.11. Tested against
 > recorded game data; it has not had much play time in the real game yet. Please report what breaks.
 
+> [!TIP]
+> **New here?** The illustrated **[How to use with Voxta](HOW_TO_USE_WITH_VOXTA.md)** guide walks
+> you through installing the module and setting up your characters, step by step with screenshots.
+
 ```
  inZOI (0.11+)                                  Voxta Server  ──  "inZOI" module
  ┌────────────────────────────────┐   MCP over    ┌──────────────────────────────────────┐
